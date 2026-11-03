@@ -34,9 +34,17 @@
     </div>
 
     <div class="topbar-actions">
+      <button id="btnToggleKpis" class="btn btn-secondary" title="Afficher ou masquer le bandeau d'indicateurs KPI">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+        KPIs
+      </button>
       <button id="btnOpenTableModal" class="btn btn-secondary" title="Ouvrir la vue tableau plein écran">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
         Vue Tableau
+      </button>
+      <button id="btnExportKML" class="btn btn-secondary" title="Télécharger le fichier KML pour importer tous les points dans Google My Maps / Google Earth">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Google My Maps (.KML)
       </button>
       <button id="btnExportCSV" class="btn btn-secondary" title="Télécharger la sélection en CSV (compatible Excel)">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -144,6 +152,18 @@
         <option value="ALL">📍 Tous les quartiers / arrondissements</option>
       </select>
     </div>
+
+    <div class="layout-view-switcher" role="group" aria-label="Mode d'affichage principal">
+      <button type="button" class="view-mode-btn active" data-layout="map" title="Carte plein écran style Google Maps">
+        🗺️ Pleine Carte
+      </button>
+      <button type="button" class="view-mode-btn" data-layout="split" title="Vue partagée : Liste + Carte côte à côte">
+        📑 Liste + Carte
+      </button>
+      <button type="button" class="view-mode-btn" data-layout="list" title="Liste des fiches plein écran">
+        📋 Liste seule
+      </button>
+    </div>
   </nav>
 
   <!-- MAIN WORKSPACE: FILTERS & LIST (LEFT) + INTERACTIVE MAP (RIGHT) -->
@@ -237,15 +257,27 @@
     <!-- RIGHT PANEL: INTERACTIVE MAP -->
     <section class="map-panel" aria-label="Carte interactive des réparateurs">
       <div class="map-toolbar">
-        <div class="map-mode-group" role="group" aria-label="Mode d'affichage carte">
-          <button id="btnMapCluster" class="map-tool-btn active" title="Regrouper par clusters dynamiques">
-            Clusters
+        <div class="map-mode-group" role="group" aria-label="Fond de carte">
+          <button id="btnBasemapGoogleStreets" class="map-tool-btn active" title="Fond de carte Google Maps Plan (Rues & Commerces)">
+            🗺️ Google Plan
           </button>
-          <button id="btnMapMarkers" class="map-tool-btn" title="Afficher tous les marqueurs individuels">
-            Marqueurs détaillés
+          <button id="btnBasemapGoogleHybrid" class="map-tool-btn" title="Fond de carte Google Satellite + Rues">
+            🛰️ Google Satellite
+          </button>
+          <button id="btnBasemapOsm" class="map-tool-btn" title="Fond de carte OpenStreetMap / CARTO">
+            🌐 OSM
+          </button>
+        </div>
+
+        <div class="map-mode-group" role="group" aria-label="Mode d'affichage des repères">
+          <button id="btnMapMarkers" class="map-tool-btn active" title="Afficher tous les repères individuels façon Google Maps">
+            📍 Repères Google Maps
+          </button>
+          <button id="btnMapCluster" class="map-tool-btn" title="Regrouper par clusters dynamiques">
+            🔵 Clusters
           </button>
           <button id="btnMapFilterBounds" class="map-tool-btn" title="Filtrer la liste selon la zone visible de la carte">
-            🔍 Filtrer sur la zone carte
+            🔍 Zone visible
           </button>
         </div>
 

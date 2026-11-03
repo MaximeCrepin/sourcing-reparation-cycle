@@ -69,7 +69,9 @@
     realPhotoOnly: false,
     cargoVaeOnly: false,
     filterByMapBounds: false,
-    mapClusterMode: true,
+    mapClusterMode: false, // Default to individual Google Maps pins so every repairer is immediately visible
+    basemap: "google_streets",
+    layoutMode: window.innerWidth < 960 ? "map" : "split",
     selectedActorId: null,
     compareIds: [],
     filteredActors: [],
@@ -77,6 +79,8 @@
 
   // Map references
   let map = null;
+  let baseTileLayers = {};
+  let currentBaseLayer = null;
   let clusterLayer = null;
   let plainMarkersLayer = null;
   const markersById = new Map();
@@ -130,7 +134,7 @@
     }, 3200);
   }
 
-  // Initialize Leaflet Map
+  // Initialize Map with Google Maps tiles (Streets, Satellite Hybrid) + OpenStreetMap
   function initMap() {
     map = L.map("mapContainer", {
       center: CITY_VIEWPORTS.ALL.center,
@@ -138,20 +142,35 @@
       zoomControl: true,
     });
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; CARTO | SIRET INSEE &amp; Panoramax',
-      subdomains: "abcd",
-      maxZoom: 20,
-    }).addTo(map);
+    baseTileLayers = {
+      google_streets: L.tileLayer("https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=fr", {
+        attribution: '&copy; Google Maps | SIRET INSEE &amp; Panoramax',
+        subdomains: ["0", "1", "2", "3"],
+        maxZoom: 21,
+      }),
+      google_hybrid: L.tileLayer("https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=fr", {
+        attribution: '&copy; Google Maps Satellite | SIRET INSEE &amp; Panoramax',
+        subdomains: ["0", "1", "2", "3"],
+        maxZoom: 21,
+      }),
+      osm: L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; CARTO | SIRET INSEE &amp; Panoramax',
+        subdomains: "abcd",
+        maxZoom: 20,
+      }),
+    };
+
+    currentBaseLayer = baseTileLayers.google_streets;
+    currentBaseLayer.addTo(map);
 
     clusterLayer = L.markerClusterGroup({
       showCoverageOnHover: false,
-      maxClusterRadius: 42,
+      maxClusterRadius: 36,
       spiderfyOnMaxZoom: true,
     });
 
     plainMarkersLayer = L.layerGroup();
-    map.addLayer(clusterLayer);
+    map.addLayer(plainMarkersLayer);
 
     map.on("moveend", () => {
       if (state.filterByMapBounds) {
@@ -160,23 +179,63 @@
     });
   }
 
+  function setBasemap(mode) {
+    if (!baseTileLayers[mode] || !map) return;
+    state.basemap = mode;
+    if (currentBaseLayer) {
+      map.removeLayer(currentBaseLayer);
+    }
+    currentBaseLayer = baseTileLayers[mode];
+    currentBaseLayer.addTo(map);
+
+    $("btnBasemapGoogleStreets")?.classList.toggle("active", mode === "google_streets");
+    $("btnBasemapGoogleHybrid")?.classList.toggle("active", mode === "google_hybrid");
+    $("btnBasemapOsm")?.classList.toggle("active", mode === "osm");
+  }
+
+  function setLayoutMode(layout) {
+    state.layoutMode = layout;
+    const ws = document.querySelector(".workspace");
+    if (ws) {
+      ws.classList.toggle("layout-map-only", layout === "map");
+      ws.classList.toggle("layout-list-only", layout === "list");
+    }
+    document.querySelectorAll(".view-mode-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.layout === layout);
+    });
+    if (map && layout !== "list") {
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 120);
+    }
+  }
+
   function createActorMarker(actor) {
     const meta = TYPE_META[actor.type_acteur] || TYPE_META["Atelier indépendant"];
+    const shortLabel = actor.nom.length > 18 ? actor.nom.slice(0, 17) + "…" : actor.nom;
     const iconHtml = `
-      <div class="custom-bike-marker" style="background:${meta.color};" title="${escapeHtml(actor.nom)} (${actor.note_moyenne}★)">
-        ${actor.note_moyenne.toFixed(1)}
+      <div class="gmap-pin-wrapper" title="${escapeHtml(actor.nom)} — ${actor.note_moyenne.toFixed(1)}★ (${actor.nb_avis} avis)">
+        <div class="gmap-pin-bubble" style="background:${meta.color};">
+          <span>${meta.icon}</span>
+          <span>${actor.note_moyenne.toFixed(1)}★</span>
+        </div>
+        <div class="gmap-pin-tip" style="border-top-color:${meta.color};"></div>
+        <div class="gmap-pin-name">${escapeHtml(shortLabel)}</div>
       </div>
     `;
 
     const customIcon = L.divIcon({
       html: iconHtml,
       className: "",
-      iconSize: [34, 34],
-      iconAnchor: [17, 17],
-      popupAnchor: [0, -18],
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+      popupAnchor: [0, -44],
     });
 
     const marker = L.marker([actor.lat, actor.lng], { icon: customIcon });
+
+    const gmapsPlaceUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(actor.nom + " " + actor.adresse)}`;
+    const gmapsDirUrl = `https://www.google.com/maps/dir/?api=1&destination=${actor.lat},${actor.lng}`;
 
     const popupHtml = `
       <div class="map-popup-card">
@@ -189,12 +248,20 @@
             <span>⭐ <strong>${actor.note_moyenne.toFixed(1)}/5</strong> (${actor.nb_avis} avis)</span>
             <span>💶 CA : <strong>${formatCompactCA(actor.chiffre_affaires)}</strong></span>
           </div>
-          <div class="map-popup-btns">
+          <div class="map-popup-btns" style="margin-bottom:6px;">
             <button type="button" onclick="window.__openActorDrawer('${actor.id}')" style="background:#2563eb;color:#fff;border-color:#2563eb;">
-              Ouvrir la fiche
+              Fiche & Avis
             </button>
             <a href="${escapeHtml(actor.lien_street_view)}" target="_blank" rel="noopener" style="background:#f8fafc;color:#0f172a;">
               Street View ↗
+            </a>
+          </div>
+          <div class="map-popup-btns">
+            <a href="${escapeHtml(gmapsPlaceUrl)}" target="_blank" rel="noopener" style="background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;">
+              🗺️ Ouvrir Google Maps
+            </a>
+            <a href="${escapeHtml(gmapsDirUrl)}" target="_blank" rel="noopener" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;">
+              🧭 Itinéraire
             </a>
           </div>
         </div>
@@ -237,7 +304,7 @@
         map.setView(CITY_VIEWPORTS.ALL.center, CITY_VIEWPORTS.ALL.zoom);
       } else {
         const bounds = L.latLngBounds(boundsPoints);
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+        map.fitBounds(bounds, { paddingTopLeft: [40, 120], paddingBottomRight: [40, 40], maxZoom: 15 });
       }
     }
   }
@@ -1001,6 +1068,64 @@
     showToast(`Export JSON généré (${list.length} acteurs).`);
   }
 
+  // Export KML for direct import into Google My Maps (google.com/mymaps) or Google Earth
+  function exportFilteredKML() {
+    const list = state.filteredActors;
+    const xmlEscape = (s) =>
+      String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+
+    const placemarks = list
+      .map((a) => {
+        const best1 = a.top_5_meilleurs_avis?.[0]?.text || "";
+        const worst1 = a.top_5_pires_avis?.[0]?.text || "";
+        const desc = [
+          `<b>Typologie :</b> ${xmlEscape(a.type_acteur)} (${xmlEscape(a.statut_activite)})`,
+          `<b>Note :</b> ★ ${a.note_moyenne.toFixed(1)}/5 (${a.nb_avis} avis)`,
+          `<b>Adresse :</b> ${xmlEscape(a.adresse)} (${xmlEscape(a.quartier)})`,
+          `<b>SIRET :</b> ${xmlEscape(a.siret)} | <b>NAF :</b> ${xmlEscape(a.code_naf)}`,
+          `<b>Chiffre d'Affaires :</b> ${xmlEscape(formatCurrency(a.chiffre_affaires))} (${xmlEscape(a.ca_source)})`,
+          `<b>Tarif Révision :</b> ${a.tarif_revision_base_eur} € TTC | <b>Délai :</b> ${xmlEscape(a.delai_moyen_intervention)}`,
+          `<b>État du lieu :</b> ${xmlEscape(a.etat_du_lieu)}`,
+          `<b>Téléphone :</b> ${xmlEscape(a.telephone)} | <b>Web :</b> ${xmlEscape(a.site_web)}`,
+          `<b>Top Avis Positif :</b> « ${xmlEscape(best1)} »`,
+          `<b>Point de vigilance :</b> « ${xmlEscape(worst1)} »`,
+          `<b>Street View :</b> ${xmlEscape(a.lien_street_view)}`,
+        ].join("<br/>");
+
+        return `    <Placemark>
+      <name>${xmlEscape(a.nom)} (${a.note_moyenne.toFixed(1)}★)</name>
+      <description><![CDATA[${desc}]]></description>
+      <Point>
+        <coordinates>${a.lng},${a.lat},0</coordinates>
+      </Point>
+    </Placemark>`;
+      })
+      .join("\n");
+
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Sourcing Réparateurs Cycle France (${xmlEscape(state.city)})</name>
+    <description>Acteurs en activité de la réparation vélo — SIRET, Avis, CA, Adresses et Contacts</description>
+${placemarks}
+  </Document>
+</kml>`;
+
+    const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `google_mymaps_reparateurs_cycle_${state.city.toLowerCase()}_${list.length}_acteurs.kml`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast(`Fichier Google My Maps (.KML) téléchargé (${list.length} réparateurs) !`);
+  }
+
   // URL state sync & Shareable Link
   function syncUrlState() {
     const params = new URLSearchParams();
@@ -1095,10 +1220,7 @@
           b.classList.toggle("active", b.dataset.city === city)
         );
         updateQuartierOptions();
-
-        const vp = CITY_VIEWPORTS[city] || CITY_VIEWPORTS.ALL;
-        map.flyTo(vp.center, vp.zoom, { duration: 0.7 });
-        applyFiltersAndRender(false);
+        applyFiltersAndRender(true);
       });
     });
 
@@ -1151,7 +1273,29 @@
 
     $("btnResetFilters").addEventListener("click", resetAllFilters);
 
-    // Map toolbar buttons
+    // Map toolbar buttons (Basemap switcher: Google Plan, Google Satellite, OSM)
+    $("btnBasemapGoogleStreets")?.addEventListener("click", () => setBasemap("google_streets"));
+    $("btnBasemapGoogleHybrid")?.addEventListener("click", () => setBasemap("google_hybrid"));
+    $("btnBasemapOsm")?.addEventListener("click", () => setBasemap("osm"));
+
+    // Layout mode switcher (Full Map / Split / Full List)
+    document.querySelectorAll(".view-mode-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setLayoutMode(btn.dataset.layout);
+      });
+    });
+
+    // KPI Ribbon Toggle
+    $("btnToggleKpis")?.addEventListener("click", () => {
+      const kpiSection = document.querySelector(".kpi-ribbon");
+      if (kpiSection) {
+        kpiSection.classList.toggle("hidden");
+        if (map) {
+          setTimeout(() => map.invalidateSize(), 100);
+        }
+      }
+    });
+
     $("btnMapCluster").addEventListener("click", () => {
       state.mapClusterMode = true;
       $("btnMapCluster").classList.add("active");
@@ -1200,6 +1344,7 @@
     $("btnTableExportCSV").addEventListener("click", exportFilteredCSV);
 
     // Exports & Share
+    $("btnExportKML")?.addEventListener("click", exportFilteredKML);
     $("btnExportCSV").addEventListener("click", exportFilteredCSV);
     $("btnExportJSON").addEventListener("click", exportFilteredJSON);
     $("btnShareLink").addEventListener("click", () => {
@@ -1223,10 +1368,17 @@
   // Bootstrap
   document.addEventListener("DOMContentLoaded", () => {
     initMap();
+    setLayoutMode(state.layoutMode);
+    if (window.innerWidth < 960) {
+      document.querySelector(".kpi-ribbon")?.classList.add("hidden");
+    }
     updateCityCounts();
     restoreUrlState();
     bindEvents();
-    applyFiltersAndRender(state.city !== "ALL" || state.quartier !== "ALL");
+    setTimeout(() => {
+      if (map) map.invalidateSize();
+      applyFiltersAndRender(state.city !== "ALL" || state.quartier !== "ALL");
+    }, 80);
 
     if (state.selectedActorId) {
       setTimeout(() => {
