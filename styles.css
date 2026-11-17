@@ -1621,6 +1621,189 @@ body {
     padding: 8px 12px;
     gap: 8px;
   }
+
+  /* Prototype V2: Sheet sync, multi-select filters and focused actor details */
+  .sync-status {
+    max-width: 210px;
+    overflow: hidden;
+    color: #cbd5e1;
+    font-size: 11px;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sync-status.sync-error {
+    color: #fca5a5;
+  }
+
+  .btn:disabled {
+    cursor: wait;
+    opacity: .6;
+  }
+
+  .workspace.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace.sidebar-collapsed .sidebar-panel {
+    display: none;
+  }
+
+  .filter-group-wide {
+    grid-column: 1 / -1;
+  }
+
+  .filter-choice-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+    max-height: 76px;
+    overflow: auto;
+    padding: 2px 0;
+  }
+
+  .filter-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .filter-choice input,
+  .chip-checkbox input {
+    accent-color: var(--primary);
+  }
+
+  .decathlon-marker-badge {
+    position: absolute;
+    top: -9px;
+    right: -17px;
+    padding: 2px 4px;
+    border: 1px solid #fff;
+    border-radius: 4px;
+    background: #0072ce;
+    color: #fff;
+    font-size: 7px;
+    font-weight: 800;
+    letter-spacing: .03em;
+  }
+
+  .decathlon-legend-dot {
+    width: 10px;
+    height: 10px;
+    border: 2px solid #fff;
+    border-radius: 3px;
+    background: #0072ce;
+    box-shadow: 0 0 0 1px #0072ce;
+  }
+
+  .business-insights,
+  .price-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+  }
+
+  .insight-card,
+  .specialty-note {
+    padding: 11px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+
+  .insight-card p,
+  .specialty-note p {
+    margin: 5px 0 0;
+  }
+
+  .insight-positive {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+    color: #166534;
+  }
+
+  .insight-caution {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #9a3412;
+  }
+
+  .price-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-subtle);
+  }
+
+  .price-summary span {
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .price-summary strong {
+    color: var(--text-main);
+    font-size: 13px;
+  }
+
+  .services-price-table {
+    width: 100%;
+    margin-top: 10px;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .services-price-table th,
+  .services-price-table td {
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+  }
+
+  .services-price-table th:last-child,
+  .services-price-table td:last-child {
+    text-align: right;
+  }
+
+  .specialty-note {
+    margin-top: 10px;
+    background: #eff6ff;
+    border-color: #bfdbfe;
+  }
+
+  .internal-comment summary {
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .internal-comment p {
+    margin: 12px 0 0;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 900px) {
+    .sync-status {
+      max-width: 170px;
+    }
+  }
+
+  @media (min-width: 901px) and (max-width: 1280px) {
+    .topbar {
+      flex-wrap: wrap;
+    }
+
+    .topbar-actions {
+      width: 100%;
+      justify-content: flex-end;
+      overflow-x: auto;
+    }
+  }
   .brand-subtitle {
     display: none;
   }

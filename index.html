@@ -27,13 +27,20 @@
       <div>
         <div class="brand-title-row">
           <h1>Observatoire & Sourcing Réparation Cycle</h1>
-          <span class="status-pill"><span class="pulse-dot"></span> Acteurs en activité à date (Nov. 2026)</span>
+          <span class="status-pill"><span class="pulse-dot"></span> Prototype V2</span>
         </div>
         <p class="brand-subtitle">Cartographie nationale des 7 grandes métropoles : Paris, Lyon, Marseille, Bordeaux, Lille, Nantes, Strasbourg — Données INSEE Sirene, BAN, Panoramax & Avis Clients</p>
       </div>
     </div>
 
     <div class="topbar-actions">
+      <span id="dataSyncStatus" class="sync-status" role="status" aria-live="polite">Jeu local chargé</span>
+      <button id="btnRefreshData" class="btn btn-secondary" title="Recharger les données depuis le Google Sheet">
+        ↻ Actualiser
+      </button>
+      <button id="btnToggleSidebar" class="btn btn-secondary" aria-expanded="true" title="Masquer ou afficher le volet des filtres">
+        Masquer le volet
+      </button>
       <button id="btnToggleKpis" class="btn btn-secondary" title="Afficher ou masquer le bandeau d'indicateurs KPI">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
         KPIs
@@ -184,6 +191,10 @@
 
         <div id="advancedFiltersPanel" class="advanced-filters">
           <div class="filter-grid">
+            <div class="filter-group filter-group-wide">
+              <label>Villes / zones (sélection multiple)</label>
+              <div id="filterCityChoices" class="filter-choice-list"></div>
+            </div>
             <div class="filter-group">
               <label for="filterType">Typologie d'acteur</label>
               <select id="filterType" class="select-input">
@@ -194,6 +205,11 @@
                 <option value="Réparateur mobile / itinérant">🚐 Réparateur mobile / itinérant</option>
                 <option value="Atelier associatif / participatif">🤝 Atelier associatif / participatif</option>
               </select>
+            </div>
+
+            <div class="filter-group filter-group-wide">
+              <label>Activité</label>
+              <div id="filterActivityChoices" class="filter-choice-list"></div>
             </div>
 
             <div class="filter-group">
@@ -214,6 +230,17 @@
                 <option value="HIGH">&gt; 500 000 € / an</option>
                 <option value="MID">150 000 € à 500 000 € / an</option>
                 <option value="LOW">&lt; 150 000 € / an</option>
+                <option value="UNPUBLISHED">Non publié</option>
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="filterPrice">Forfait révision de base</label>
+              <select id="filterPrice" class="select-input">
+                <option value="ALL">Tous les tarifs</option>
+                <option value="UNDER_40">&lt; 40 €</option>
+                <option value="40_70">40 € – 70 €</option>
+                <option value="OVER_70">&gt; 70 €</option>
               </select>
             </div>
 
@@ -237,7 +264,11 @@
             </label>
             <label class="chip-checkbox">
               <input type="checkbox" id="chkCargoVAE" />
-              <span>⚡ Spécialiste VAE / Cargo</span>
+              <span>⚡ Services VAE disponibles</span>
+            </label>
+            <label class="chip-checkbox">
+              <input type="checkbox" id="chkDecathlon" />
+              <span>🔵 Sites Decathlon</span>
             </label>
             <button id="btnResetFilters" class="btn-link">Réinitialiser</button>
           </div>
@@ -270,10 +301,10 @@
         </div>
 
         <div class="map-mode-group" role="group" aria-label="Mode d'affichage des repères">
-          <button id="btnMapMarkers" class="map-tool-btn active" title="Afficher tous les repères individuels façon Google Maps">
+          <button id="btnMapMarkers" class="map-tool-btn" title="Afficher tous les repères individuels façon Google Maps">
             📍 Repères Google Maps
           </button>
-          <button id="btnMapCluster" class="map-tool-btn" title="Regrouper par clusters dynamiques">
+          <button id="btnMapCluster" class="map-tool-btn active" title="Clusters automatiques sous le niveau de zoom 14">
             🔵 Clusters
           </button>
           <button id="btnMapFilterBounds" class="map-tool-btn" title="Filtrer la liste selon la zone visible de la carte">
@@ -281,13 +312,7 @@
           </button>
         </div>
 
-        <div class="map-legend">
-          <span class="legend-item"><i class="dot dot-indep"></i> Atelier indép.</span>
-          <span class="legend-item"><i class="dot dot-velociste"></i> Vélociste</span>
-          <span class="legend-item"><i class="dot dot-reseau"></i> Réseau / Enseigne</span>
-          <span class="legend-item"><i class="dot dot-mobile"></i> Mobile</span>
-          <span class="legend-item"><i class="dot dot-asso"></i> Associatif</span>
-        </div>
+        <div id="mapLegend" class="map-legend" aria-label="Légende des activités"></div>
       </div>
 
       <div id="mapContainer" class="map-canvas"></div>

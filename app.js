@@ -1,5 +1,5 @@
 /**
- * Application Interactive — Observatoire & Sourcing Réparation Cycle France (7 Grandes Villes)
+ * Application Interactive V2 — Observatoire & Sourcing Réparation Cycle France
  * - Carte Leaflet avec Clusters & Marqueurs codés par typologie
  * - Navigation par agglomération (Paris, Lyon, Marseille, Bordeaux, Lille, Nantes, Strasbourg) & par quartier
  * - Filtres multicritères (Type, Note, Chiffre d'Affaires, Photo Panoramax, Spécialités VAE/Cargo, Zone Carte)
@@ -11,7 +11,10 @@
 (function () {
   "use strict";
 
-  const ACTORS = Array.isArray(window.REPARATEURS_DATA) ? window.REPARATEURS_DATA : [];
+  const SHEET_CSV_URL = window.REPARATEURS_SHEET_CSV_URL ||
+    "https://docs.google.com/spreadsheets/d/1mNO8h5UqARz7rlG3J25R0XPOp8TJslFYLp4QFnN89xA/export?format=csv&gid=1743736709";
+  let ACTORS = (Array.isArray(window.REPARATEURS_DATA) ? window.REPARATEURS_DATA : [])
+    .map((actor, index) => normalizeActor(actor, index));
 
   const CITY_VIEWPORTS = {
     ALL: { center: [46.75, 2.55], zoom: 6 },
@@ -57,19 +60,221 @@
     },
   };
 
+  const ACTIVITY_META = {
+    [normalizedKey("réparation")]: { color: "#2563eb", icon: "🔧" },
+    [normalizedKey("Auto-réparation")]: { color: "#0d9488", icon: "🛠️" },
+    [normalizedKey("Services mobiles")]: { color: "#ea580c", icon: "🚐" },
+    [normalizedKey("Bornes de services")]: { color: "#ca8a04", icon: "🔩" },
+    [normalizedKey("Seconde vie")]: { color: "#7c3aed", icon: "♻️" },
+    [normalizedKey("Tiers lieux et occasion")]: { color: "#0891b2", icon: "🔄" },
+    [normalizedKey("Vélociste et réparation")]: { color: "#059669", icon: "🚲" },
+  };
+
+  function normalizedKey(value) {
+    return String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  }
+
+  function readField(row, ...names) {
+    const fields = new Map(Object.entries(row).map(([key, value]) => [normalizedKey(key), value]));
+    for (const name of names) {
+      const value = fields.get(normalizedKey(name));
+      if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+    }
+    return "";
+  }
+
+  function parseNumber(value) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    const match = String(value ?? "").replace(/\s/g, "").match(/-?\d+(?:[.,]\d+)?/);
+    if (!match) return null;
+    const number = Number(match[0].replace(",", "."));
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function parseBoolean(value) {
+    return value === true || ["true", "1", "oui", "yes", "vrai"].includes(String(value).trim().toLowerCase());
+  }
+
+  function safeExternalUrl(value) {
+    const text = String(value ?? "").trim();
+    if (!text) return "";
+    try {
+      const url = new URL(text, window.location.href);
+      return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function parseStructuredValue(value, fallback = []) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") return value;
+    if (typeof value !== "string" || !value.trim()) return fallback;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function normalizeActor(row, index) {
+    const actor = { ...row };
+    const pick = (...names) => readField(row, ...names);
+    const serviceValue = pick("services", "specialites");
+    const bestReviewValue = pick("top_5_meilleurs_avis", "top_5_avis");
+    const worstReviewValue = pick("top_5_pires_avis", "worst_5_avis");
+    const services = parseStructuredValue(
+      serviceValue,
+      typeof serviceValue === "string" ? serviceValue.split(/[,;|]/).map((item) => item.trim()).filter(Boolean) : []
+    );
+    const bestReviews = parseStructuredValue(bestReviewValue, null);
+    const worstReviews = parseStructuredValue(worstReviewValue, null);
+    const catalog = parseStructuredValue(pick("catalogue_prestations", "prestations"), []);
+    const type = pick("type_acteur", "type", "statut") || "Atelier indépendant";
+    const name = pick("nom", "name") || `Acteur ${index + 1}`;
+    const coordinates = [
+      parseNumber(pick("lat", "latitude")),
+      parseNumber(pick("lng", "longitude", "lon")),
+    ];
+
+    return {
+      ...actor,
+      id: String(pick("id") || pick("siret") || `${normalizedKey(name)}-${index}`)
+        .replace(/[^a-zA-Z0-9_-]/g, "") || `${normalizedKey(name)}-${index}`,
+      nom: String(name),
+      raison_sociale: String(pick("raison_sociale") || name),
+      ville: String(pick("ville", "zone_geo", "city")),
+      quartier: String(pick("quartier", "zone_detail") || ""),
+      code_postal: String(pick("code_postal", "code postal")),
+      adresse: String(pick("adresse", "adresse_postale", "address") || ""),
+      lat: coordinates[0],
+      lng: coordinates[1],
+      siret: String(pick("siret") || ""),
+      siren: String(pick("siren") || ""),
+      code_naf: String(pick("code_naf", "naf") || ""),
+      libelle_naf: String(pick("libelle_naf") || ""),
+      statut_activite: String(pick("statut_activite", "etat_administratif") || "En activité"),
+      statut: String(pick("statut", "type_acteur") || ""),
+      date_creation: String(pick("date_creation") || ""),
+      anciennete_ans: parseNumber(pick("anciennete_ans")) || 0,
+      type_acteur: String(type),
+      activite: String(pick("activite", "activity") || type),
+      is_decathlon: parseBoolean(pick("is_decathlon", "decathlon")),
+      dirigeants: String(pick("dirigeants") || ""),
+      effectif: String(pick("effectif") || ""),
+      chiffre_affaires: parseNumber(pick("chiffre_affaires", "ca")),
+      ca_annee: String(pick("ca_annee") || ""),
+      ca_source: String(pick("ca_source") || ""),
+      ca_est_publie: parseBoolean(pick("ca_est_publie")),
+      note_moyenne: parseNumber(pick("note_moyenne", "avis_client_google", "note")) || 0,
+      nb_avis: parseNumber(pick("nb_avis", "nombre_avis")) ||
+        parseNumber(String(pick("avis_client_google")).match(/\(([\d\s.,]+)\)/)?.[1]) || 0,
+      top_5_meilleurs_avis: Array.isArray(bestReviews)
+        ? bestReviews
+        : ((pick("top_1_meilleur_avis", "top_5_avis") || (typeof bestReviewValue === "string" ? bestReviewValue : ""))
+          ? [{ author: "", rating: 5, tag: "", text: String(pick("top_1_meilleur_avis", "top_5_avis") || bestReviewValue) }]
+          : []),
+      top_5_pires_avis: Array.isArray(worstReviews)
+        ? worstReviews
+        : ((pick("top_1_pire_avis", "worst_5_avis") || (typeof worstReviewValue === "string" ? worstReviewValue : ""))
+          ? [{ author: "", rating: 2, tag: "", text: String(pick("top_1_pire_avis", "worst_5_avis") || worstReviewValue) }]
+          : []),
+      etat_du_lieu: String(pick("etat_du_lieu") || ""),
+      tarif_revision_base_eur: parseNumber(pick("tarif_revision_base_eur", "prix_forfait_revision_base")) ,
+      tarif_revision_complete_eur: parseNumber(pick("prix_forfait_revision_complete", "tarif_revision_complete_eur")),
+      taux_horaire_mo: pick("taux_horaire_mo") || "",
+      catalogue_prestations: catalog,
+      offre_vae_specifique: String(pick("offre_vae_specifique") || ""),
+      points_forts: String(pick("points_forts") || ""),
+      points_faibles: String(pick("points_faibles") || ""),
+      commentaire: String(pick("commentaire") || ""),
+      delai_moyen_intervention: String(pick("delai_moyen_intervention", "delai") || ""),
+      telephone: String(pick("telephone", "phone") || ""),
+      email: String(pick("email") || ""),
+      site_web: safeExternalUrl(pick("site_web", "website")),
+      photo_url: safeExternalUrl(pick("photo_url", "photo_streetview_url")),
+      photo_atelier_fallback: safeExternalUrl(pick("photo_atelier_fallback", "photo_url", "photo_streetview_url")),
+      photo_source: String(pick("photo_source") || ""),
+      lien_street_view: safeExternalUrl(pick("lien_street_view") || (coordinates[0] != null && coordinates[1] != null
+        ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${coordinates[0]},${coordinates[1]}`
+        : "")),
+      lien_panoramax: safeExternalUrl(pick("lien_panoramax")),
+      lien_google_maps: safeExternalUrl(pick("lien_google_maps") || (coordinates[0] != null && coordinates[1] != null
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name} ${pick("adresse", "adresse_postale")}`)}`
+        : "")),
+      lien_annuaire_entreprises: safeExternalUrl(pick("lien_annuaire_entreprises")),
+      lien_pappers: safeExternalUrl(pick("lien_pappers")),
+      lien_pagesjaunes: safeExternalUrl(pick("lien_pagesjaunes")),
+      reseaux_sociaux: {
+        instagram: safeExternalUrl(pick("instagram")),
+        facebook: safeExternalUrl(pick("facebook")),
+        linkedin: safeExternalUrl(pick("linkedin")),
+      },
+      horaires: String(pick("horaires") || ""),
+      services: Array.isArray(services) ? services : String(services).split(/[,;|]/).map((item) => item.trim()).filter(Boolean),
+    };
+  }
+
+  function parseCsv(text) {
+    const rows = [];
+    let row = [];
+    let value = "";
+    let quoted = false;
+    const input = text.replace(/^\uFEFF/, "");
+
+    for (let i = 0; i < input.length; i += 1) {
+      const char = input[i];
+      if (char === '"' && quoted && input[i + 1] === '"') {
+        value += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = !quoted;
+      } else if (char === "," && !quoted) {
+        row.push(value);
+        value = "";
+      } else if ((char === "\n" || char === "\r") && !quoted) {
+        if (char === "\r" && input[i + 1] === "\n") i += 1;
+        row.push(value);
+        if (row.some((cell) => cell.trim())) rows.push(row);
+        row = [];
+        value = "";
+      } else {
+        value += char;
+      }
+    }
+    if (value || row.length) {
+      row.push(value);
+      if (row.some((cell) => cell.trim())) rows.push(row);
+    }
+
+    if (rows.length < 2) throw new Error("Le Google Sheet ne contient aucune ligne exploitable.");
+    const headers = rows[0].map((header) => header.trim());
+    return rows.slice(1).map((cells) =>
+      Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ""]))
+    );
+  }
+
   // Application State
   const state = {
     city: "ALL",
+    cities: [],
     quartier: "ALL",
     search: "",
     type: "ALL",
+    activities: [],
     minRating: 0,
     caBracket: "ALL",
+    priceBracket: "ALL",
     sortBy: "rating_desc",
     realPhotoOnly: false,
     cargoVaeOnly: false,
+    decathlonOnly: false,
     filterByMapBounds: false,
-    mapClusterMode: false, // Default to individual Google Maps pins so every repairer is immediately visible
+    mapClusterMode: true,
     basemap: "google_streets",
     layoutMode: window.innerWidth < 960 ? "map" : "split",
     selectedActorId: null,
@@ -166,6 +371,7 @@
     clusterLayer = L.markerClusterGroup({
       showCoverageOnHover: false,
       maxClusterRadius: 36,
+      maxClusterZoom: 13,
       spiderfyOnMaxZoom: true,
     });
 
@@ -211,16 +417,19 @@
   }
 
   function createActorMarker(actor) {
-    const meta = TYPE_META[actor.type_acteur] || TYPE_META["Atelier indépendant"];
+    const typeMeta = TYPE_META[actor.type_acteur] || TYPE_META["Atelier indépendant"];
+    const meta = { ...typeMeta, ...ACTIVITY_META[normalizedKey(actor.activite)] };
     const shortLabel = actor.nom.length > 18 ? actor.nom.slice(0, 17) + "…" : actor.nom;
+    const markerColor = actor.is_decathlon ? "#0072ce" : meta.color;
     const iconHtml = `
       <div class="gmap-pin-wrapper" title="${escapeHtml(actor.nom)} — ${actor.note_moyenne.toFixed(1)}★ (${actor.nb_avis} avis)">
-        <div class="gmap-pin-bubble" style="background:${meta.color};">
+        <div class="gmap-pin-bubble" style="background:${markerColor};">
           <span>${meta.icon}</span>
           <span>${actor.note_moyenne.toFixed(1)}★</span>
         </div>
-        <div class="gmap-pin-tip" style="border-top-color:${meta.color};"></div>
+        <div class="gmap-pin-tip" style="border-top-color:${markerColor};"></div>
         <div class="gmap-pin-name">${escapeHtml(shortLabel)}</div>
+        ${actor.is_decathlon ? '<span class="decathlon-marker-badge">DECATHLON</span>' : ""}
       </div>
     `;
 
@@ -312,7 +521,9 @@
   // Populate Quartier Dropdown based on selected City
   function updateQuartierOptions() {
     const select = $("selectQuartier");
-    const relevant = state.city === "ALL"
+    const relevant = state.cities.length
+      ? ACTORS.filter((a) => state.cities.includes(a.ville))
+      : state.city === "ALL"
       ? ACTORS
       : ACTORS.filter((a) => a.ville === state.city);
 
@@ -356,29 +567,121 @@
     }
   }
 
+  function renderFilterChoices(containerId, values, selectedValues, onChange) {
+    const container = $(containerId);
+    if (!container) return;
+    container.innerHTML = "";
+    for (const value of values) {
+      const label = document.createElement("label");
+      label.className = "filter-choice";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = value;
+      input.checked = selectedValues.includes(value);
+      input.addEventListener("change", onChange);
+      const text = document.createElement("span");
+      text.textContent = value;
+      label.append(input, text);
+      container.appendChild(label);
+    }
+  }
+
+  function updateFilterChoices() {
+    const cities = [...new Set(ACTORS.map((actor) => actor.ville).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    const activities = [...new Set(ACTORS.map((actor) => actor.activite).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    const hadSelectedCities = state.cities.length > 0;
+    state.cities = state.cities.filter((city) => cities.includes(city));
+    state.activities = state.activities.filter((activity) => activities.includes(activity));
+    if (state.cities.length === 1) state.city = state.cities[0];
+    else if (state.cities.length > 1) state.city = "ALL";
+    else if (hadSelectedCities) state.city = "ALL";
+    renderFilterChoices("filterCityChoices", cities, state.cities, () => {
+      state.cities = [...$("filterCityChoices").querySelectorAll("input:checked")].map((input) => input.value);
+      state.city = state.cities.length === 1 ? state.cities[0] : "ALL";
+      state.quartier = "ALL";
+      updateCityPillSelection();
+      updateQuartierOptions();
+      applyFiltersAndRender(false);
+    });
+    renderFilterChoices("filterActivityChoices", activities, state.activities, () => {
+      state.activities = [...$("filterActivityChoices").querySelectorAll("input:checked")].map((input) => input.value);
+      applyFiltersAndRender(false);
+    });
+    renderMapLegend();
+    updateCityPillSelection();
+  }
+
+  function renderMapLegend() {
+    const legend = $("mapLegend");
+    if (!legend) return;
+    const activities = [...new Set(ACTORS.map((actor) => actor.activite).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, "fr"));
+    legend.innerHTML = "";
+    for (const activity of activities) {
+      const meta = ACTIVITY_META[normalizedKey(activity)] ||
+        TYPE_META[ACTORS.find((actor) => actor.activite === activity)?.type_acteur] ||
+        TYPE_META["Atelier indépendant"];
+      const item = document.createElement("span");
+      item.className = "legend-item";
+      const dot = document.createElement("i");
+      dot.className = "dot";
+      dot.style.backgroundColor = meta.color;
+      const label = document.createElement("span");
+      label.textContent = activity;
+      item.append(dot, label);
+      legend.appendChild(item);
+    }
+    const decathlon = document.createElement("span");
+    decathlon.className = "legend-item";
+    decathlon.innerHTML = '<i class="decathlon-legend-dot"></i> Decathlon';
+    legend.appendChild(decathlon);
+  }
+
+  function updateCityPillSelection() {
+    document.querySelectorAll(".city-pill").forEach((btn) => {
+      const selected = state.cities.length
+        ? state.cities.length === 1 && state.cities[0] === btn.dataset.city
+        : btn.dataset.city === state.city;
+      btn.classList.toggle("active", selected);
+      btn.setAttribute("aria-pressed", String(selected));
+    });
+  }
+
   // Filter & Sort Logic
   function applyFiltersAndRender(fitMap = false) {
     const q = state.search.trim().toLowerCase();
     const mapBounds = state.filterByMapBounds && map ? map.getBounds() : null;
 
     const filtered = ACTORS.filter((a) => {
-      if (state.city !== "ALL" && a.ville !== state.city) return false;
+      if (state.cities.length && !state.cities.includes(a.ville)) return false;
+      if (!state.cities.length && state.city !== "ALL" && a.ville !== state.city) return false;
       if (state.quartier !== "ALL" && a.quartier !== state.quartier) return false;
       if (state.type !== "ALL" && a.type_acteur !== state.type) return false;
+      if (state.activities.length && !state.activities.includes(a.activite)) return false;
       if (state.minRating > 0 && a.note_moyenne < state.minRating) return false;
 
       if (state.caBracket === "PUBLISHED" && !a.ca_est_publie) return false;
       if (state.caBracket === "HIGH" && (a.chiffre_affaires || 0) < 500000) return false;
       if (state.caBracket === "MID" && ((a.chiffre_affaires || 0) < 150000 || (a.chiffre_affaires || 0) > 500000)) return false;
-      if (state.caBracket === "LOW" && (a.chiffre_affaires || 0) >= 150000) return false;
+      if (state.caBracket === "LOW" && (a.chiffre_affaires == null || a.chiffre_affaires >= 150000)) return false;
+      if (state.caBracket === "UNPUBLISHED" && a.ca_est_publie) return false;
+
+      const basePrice = a.tarif_revision_base_eur;
+      if (state.priceBracket !== "ALL" && basePrice == null) return false;
+      if (state.priceBracket === "UNDER_40" && basePrice >= 40) return false;
+      if (state.priceBracket === "40_70" && (basePrice < 40 || basePrice > 70)) return false;
+      if (state.priceBracket === "OVER_70" && basePrice <= 70) return false;
 
       if (state.realPhotoOnly && !String(a.photo_source || "").includes("Panoramax")) return false;
       if (state.cargoVaeOnly) {
-        const srvText = (a.services || []).join(" ").toLowerCase();
+        const srvText = `${(a.services || []).join(" ")} ${a.offre_vae_specifique || ""} ${a.activite || ""}`.toLowerCase();
         if (!srvText.includes("vae") && !srvText.includes("cargo")) return false;
       }
+      if (state.decathlonOnly && !a.is_decathlon) return false;
 
-      if (mapBounds && !mapBounds.contains([a.lat, a.lng])) return false;
+      if (mapBounds && (a.lat == null || a.lng == null || !mapBounds.contains([a.lat, a.lng]))) return false;
 
       if (q) {
         const haystack = [
@@ -391,6 +694,8 @@
           a.siret,
           a.siren,
           a.type_acteur,
+          a.activite,
+          a.statut,
           a.dirigeants,
           ...(a.services || []),
         ]
@@ -427,6 +732,7 @@
     renderKPIs();
     renderActorsList();
     updateMapMarkers(fitMap);
+    $("resultsCountLabel").innerHTML = `<strong>${filtered.length}</strong> acteur(s) affiché(s) sur ${ACTORS.length}`;
     syncUrlState();
   }
 
@@ -643,7 +949,7 @@
     const meta = TYPE_META[actor.type_acteur] || TYPE_META["Atelier indépendant"];
     const badge = $("drawerTypeBadge");
     badge.className = `actor-type-badge ${meta.badgeClass}`;
-    badge.textContent = `${meta.icon} ${actor.type_acteur} • ${actor.statut_activite}`;
+    badge.textContent = `${meta.icon} ${actor.type_acteur} • ${actor.statut_activite}${actor.is_decathlon ? " • Decathlon" : ""}`;
 
     $("drawerActorName").textContent = actor.nom;
     $("drawerActorSubtitle").textContent = `${actor.raison_sociale} — ${actor.quartier}`;
@@ -687,12 +993,21 @@
     const servicesHtml = (actor.services || [])
       .map((s) => `<span class="service-tag">✓ ${escapeHtml(s)}</span>`)
       .join("");
+    const prestationRows = (Array.isArray(actor.catalogue_prestations) ? actor.catalogue_prestations : [])
+      .map((item) => {
+        const label = item.prestation || item.libelle || item.nom || "";
+        const price = item.prix_ttc ?? item.prix ?? item.price ?? "";
+        return `<tr><td>${escapeHtml(label)}</td><td>${price === "" ? "Non communiqué" : escapeHtml(typeof price === "number" ? formatCurrency(price) : price)}</td></tr>`;
+      })
+      .join("");
 
     const body = $("drawerBodyContent");
     body.innerHTML = `
       <!-- PHOTO & ETAT DU LIEU -->
       <div class="drawer-hero">
-        <img class="drawer-hero-img" src="${escapeHtml(actor.photo_url)}" onerror="this.src='${escapeHtml(actor.photo_atelier_fallback)}'" alt="Photo de ${escapeHtml(actor.nom)}" />
+        <a class="drawer-photo-link" href="${escapeHtml(actor.lien_street_view)}" target="_blank" rel="noopener" aria-label="Ouvrir Street View pour ${escapeHtml(actor.nom)}">
+          <img class="drawer-hero-img" src="${escapeHtml(actor.photo_url)}" onerror="this.src='${escapeHtml(actor.photo_atelier_fallback)}'" alt="Photo de ${escapeHtml(actor.nom)}" />
+        </a>
         <div class="drawer-hero-overlay">
           <div class="etat-lieu-box">
             <div class="etat-lieu-text">
@@ -708,6 +1023,14 @@
               </a>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title"><span>💡 Analyse métier</span></div>
+        <div class="business-insights">
+          ${actor.points_forts ? `<div class="insight-card insight-positive"><strong>Points forts</strong><p>${escapeHtml(actor.points_forts)}</p></div>` : ""}
+          ${actor.points_faibles ? `<div class="insight-card insight-caution"><strong>Points de vigilance</strong><p>${escapeHtml(actor.points_faibles)}</p></div>` : ""}
         </div>
       </div>
 
@@ -791,7 +1114,8 @@
           <div class="info-cell">
             <div class="info-cell-label">Téléphone & Horaires</div>
             <div class="info-cell-val"><a href="tel:${escapeHtml(actor.telephone.replace(/\s+/g, ""))}" style="color:#2563eb;text-decoration:none;">${escapeHtml(actor.telephone)}</a></div>
-            <div class="info-cell-sub">Horaires : ${escapeHtml(actor.horaires)} • Email : ${escapeHtml(actor.email)}</div>
+            <div class="info-cell-sub">Horaires : ${escapeHtml(actor.horaires)} • <a href="mailto:${escapeHtml(actor.email)}">${escapeHtml(actor.email)}</a></div>
+            <div class="info-cell-sub">GPS : ${actor.lat ?? "—"}, ${actor.lng ?? "—"}</div>
           </div>
         </div>
         <div class="external-links-grid">
@@ -816,13 +1140,22 @@
       <!-- PRESTATIONS, SPECIALITES & TARIFS -->
       <div class="drawer-section">
         <div class="drawer-section-title">
-          <span>🔧 Prestations, Spécialités & Indicateurs Atelier</span>
-          <span style="font-size:12px;color:#059669;font-weight:700;">Forfait révision dès ${actor.tarif_revision_base_eur} € TTC • Délai : ${escapeHtml(actor.delai_moyen_intervention)}</span>
+          <span>🔧 Prestations & tarifs</span>
+          <span style="font-size:12px;color:#059669;font-weight:700;">Délai : ${escapeHtml(actor.delai_moyen_intervention)}</span>
         </div>
+        <div class="price-summary">
+          <div><span>Taux horaire</span><strong>${actor.taux_horaire_mo ? escapeHtml(typeof actor.taux_horaire_mo === "number" ? `${formatCurrency(actor.taux_horaire_mo)}/h` : actor.taux_horaire_mo) : "Non communiqué"}</strong></div>
+          <div><span>Révision de base</span><strong>${actor.tarif_revision_base_eur == null ? "Non communiqué" : formatCurrency(actor.tarif_revision_base_eur)}</strong></div>
+          <div><span>Révision complète</span><strong>${actor.tarif_revision_complete_eur == null ? "Non communiqué" : formatCurrency(actor.tarif_revision_complete_eur)}</strong></div>
+        </div>
+        ${prestationRows ? `<table class="services-price-table"><thead><tr><th>Prestation</th><th>Prix TTC</th></tr></thead><tbody>${prestationRows}</tbody></table>` : ""}
         <div class="services-tags">
           ${servicesHtml}
         </div>
+        ${actor.offre_vae_specifique ? `<div class="specialty-note"><strong>⚡ VAE / carbone</strong><p>${escapeHtml(actor.offre_vae_specifique)}</p></div>` : ""}
       </div>
+
+      ${actor.commentaire ? `<details class="drawer-section internal-comment"><summary>📝 Commentaire interne</summary><p>${escapeHtml(actor.commentaire)}</p></details>` : ""}
     `;
 
     $("actorDrawerBackdrop").classList.remove("hidden");
@@ -987,63 +1320,16 @@
   // Export CSV & JSON
   function exportFilteredCSV() {
     const list = state.filteredActors;
-    const headers = [
-      "ID", "Nom", "Raison_Sociale", "Ville", "Quartier", "Code_Postal", "Adresse",
-      "Latitude", "Longitude", "SIRET", "SIREN", "Code_NAF", "Statut", "Date_Creation",
-      "Type_Acteur", "Dirigeants", "Effectif", "Chiffre_Affaires_EUR", "CA_Source",
-      "Note_Moyenne_Sur_5", "Nombre_Avis", "Tarif_Revision_EUR", "Delai_Moyen",
-      "Etat_Du_Lieu", "Telephone", "Email", "Site_Web", "Instagram", "Facebook", "LinkedIn",
-      "Photo_URL", "Lien_Street_View", "Lien_Annuaire_Gouv", "Lien_Pappers", "Lien_Google_Maps",
-      "Top_1_Meilleur_Avis", "Top_1_Pire_Avis"
-    ];
-
+    const source = list.length ? list : ACTORS;
+    const headers = [...new Set(source.flatMap((actor) => Object.keys(actor)))];
     const csvEscape = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const rows = [headers.join(";")];
 
     for (const a of list) {
-      rows.push(
-        [
-          a.id,
-          a.nom,
-          a.raison_sociale,
-          a.ville,
-          a.quartier,
-          a.code_postal,
-          a.adresse,
-          a.lat,
-          a.lng,
-          a.siret,
-          a.siren,
-          a.code_naf,
-          a.statut_activite,
-          a.date_creation,
-          a.type_acteur,
-          a.dirigeants,
-          a.effectif,
-          a.chiffre_affaires,
-          a.ca_source,
-          a.note_moyenne,
-          a.nb_avis,
-          a.tarif_revision_base_eur,
-          a.delai_moyen_intervention,
-          a.etat_du_lieu,
-          a.telephone,
-          a.email,
-          a.site_web,
-          a.reseaux_sociaux?.instagram || "",
-          a.reseaux_sociaux?.facebook || "",
-          a.reseaux_sociaux?.linkedin || "",
-          a.photo_url,
-          a.lien_street_view,
-          a.lien_annuaire_entreprises,
-          a.lien_pappers,
-          a.lien_google_maps,
-          a.top_5_meilleurs_avis?.[0]?.text || "",
-          a.top_5_pires_avis?.[0]?.text || "",
-        ]
-          .map(csvEscape)
-          .join(";")
-      );
+      rows.push(headers.map((header) => {
+        const value = a[header];
+        return csvEscape(value && typeof value === "object" ? JSON.stringify(value) : value);
+      }).join(";"));
     }
 
     const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
@@ -1129,11 +1415,14 @@ ${placemarks}
   // URL state sync & Shareable Link
   function syncUrlState() {
     const params = new URLSearchParams();
-    if (state.city !== "ALL") params.set("city", state.city);
+    if (state.cities.length) params.set("cities", state.cities.join(","));
+    else if (state.city !== "ALL") params.set("city", state.city);
     if (state.quartier !== "ALL") params.set("quartier", state.quartier);
     if (state.type !== "ALL") params.set("type", state.type);
+    if (state.activities.length) params.set("activities", state.activities.join(","));
     if (state.minRating > 0) params.set("rating", String(state.minRating));
     if (state.caBracket !== "ALL") params.set("ca", state.caBracket);
+    if (state.priceBracket !== "ALL") params.set("price", state.priceBracket);
     if (state.search) params.set("q", state.search);
     if (state.selectedActorId) params.set("actor", state.selectedActorId);
     const qs = params.toString();
@@ -1145,10 +1434,16 @@ ${placemarks}
     const params = new URLSearchParams(window.location.search);
     if (params.get("city") && CITY_VIEWPORTS[params.get("city")]) {
       state.city = params.get("city");
+      state.cities = [state.city];
     }
+    if (params.get("cities")) state.cities = params.get("cities").split(",").filter(Boolean);
+    if (state.cities.length === 1) state.city = state.cities[0];
+    else if (state.cities.length > 1) state.city = "ALL";
     if (params.get("type")) state.type = params.get("type");
+    if (params.get("activities")) state.activities = params.get("activities").split(",").filter(Boolean);
     if (params.get("rating")) state.minRating = parseFloat(params.get("rating")) || 0;
     if (params.get("ca")) state.caBracket = params.get("ca");
+    if (params.get("price")) state.priceBracket = params.get("price");
     if (params.get("q")) state.search = params.get("q");
     if (params.get("quartier")) state.quartier = params.get("quartier");
 
@@ -1156,12 +1451,14 @@ ${placemarks}
     $("filterType").value = state.type;
     $("filterRating").value = String(state.minRating);
     $("filterCA").value = state.caBracket;
+    $("filterPrice").value = state.priceBracket;
 
     document.querySelectorAll(".city-pill").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.city === state.city);
     });
 
     updateQuartierOptions();
+    updateFilterChoices();
     if (params.get("actor")) {
       state.selectedActorId = params.get("actor");
     }
@@ -1170,31 +1467,86 @@ ${placemarks}
   // Reset all filters
   function resetAllFilters() {
     state.city = "ALL";
+    state.cities = [];
     state.quartier = "ALL";
     state.search = "";
     state.type = "ALL";
+    state.activities = [];
     state.minRating = 0;
     state.caBracket = "ALL";
+    state.priceBracket = "ALL";
     state.sortBy = "rating_desc";
     state.realPhotoOnly = false;
     state.cargoVaeOnly = false;
+    state.decathlonOnly = false;
     state.filterByMapBounds = false;
 
     $("searchInput").value = "";
     $("filterType").value = "ALL";
     $("filterRating").value = "0";
     $("filterCA").value = "ALL";
+    $("filterPrice").value = "ALL";
     $("sortSelect").value = "rating_desc";
     $("chkRealPhotoOnly").checked = false;
     $("chkCargoVAE").checked = false;
+    $("chkDecathlon").checked = false;
     $("btnMapFilterBounds").classList.remove("active");
 
-    document.querySelectorAll(".city-pill").forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.city === "ALL");
-    });
-
+    updateFilterChoices();
     updateQuartierOptions();
     applyFiltersAndRender(true);
+  }
+
+  function setSyncStatus(message, failed = false) {
+    const status = $("dataSyncStatus");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("sync-error", failed);
+    status.title = failed
+      ? "La feuille doit être lisible sans authentification et publiée en CSV pour activer la synchronisation."
+      : message;
+  }
+
+  async function refreshSheetData(manual = false) {
+    const button = $("btnRefreshData");
+    if (button) button.disabled = true;
+    setSyncStatus("Synchronisation du Google Sheet…");
+    try {
+      const response = await fetch(SHEET_CSV_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const rows = parseCsv(await response.text());
+      const refreshedActors = rows
+        .map((row, index) => normalizeActor(row, index))
+        .filter((actor) => actor.nom && actor.ville);
+      if (!refreshedActors.length) throw new Error("aucun acteur avec nom et ville");
+
+      ACTORS = refreshedActors;
+      window.REPARATEURS_DATA = ACTORS;
+      if (state.selectedActorId && !ACTORS.some((actor) => actor.id === state.selectedActorId)) {
+        state.selectedActorId = null;
+        closeActorDrawer();
+      }
+      updateCityCounts();
+      updateFilterChoices();
+      updateQuartierOptions();
+      applyFiltersAndRender(false);
+      const time = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+      setSyncStatus(`Google Sheet synchronisé · ${ACTORS.length} acteurs · ${time}`);
+      if (manual) showToast(`${ACTORS.length} acteurs synchronisés depuis le Google Sheet.`);
+      return true;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "erreur inconnue";
+      const detail = reason.includes("401") || reason.includes("403")
+        ? "accès refusé"
+        : reason.includes("Failed to fetch")
+          ? "feuille non publiée ou accès réseau/CORS refusé"
+          : reason;
+      setSyncStatus(`Google Sheet inaccessible · ${detail} · jeu local conservé`, true);
+      if (manual) showToast("Synchronisation impossible : vérifiez le partage public CSV du Google Sheet.");
+      return false;
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   // Global hooks for inline popup/table triggers
@@ -1215,10 +1567,10 @@ ${placemarks}
       btn.addEventListener("click", () => {
         const city = btn.dataset.city;
         state.city = city;
+        state.cities = city === "ALL" ? [] : [city];
         state.quartier = "ALL";
-        document.querySelectorAll(".city-pill").forEach((b) =>
-          b.classList.toggle("active", b.dataset.city === city)
-        );
+        updateCityPillSelection();
+        updateFilterChoices();
         updateQuartierOptions();
         applyFiltersAndRender(true);
       });
@@ -1256,6 +1608,11 @@ ${placemarks}
       applyFiltersAndRender(false);
     });
 
+    $("filterPrice").addEventListener("change", (e) => {
+      state.priceBracket = e.target.value;
+      applyFiltersAndRender(false);
+    });
+
     $("sortSelect").addEventListener("change", (e) => {
       state.sortBy = e.target.value;
       applyFiltersAndRender(false);
@@ -1271,7 +1628,21 @@ ${placemarks}
       applyFiltersAndRender(false);
     });
 
+    $("chkDecathlon").addEventListener("change", (e) => {
+      state.decathlonOnly = e.target.checked;
+      applyFiltersAndRender(false);
+    });
+
     $("btnResetFilters").addEventListener("click", resetAllFilters);
+    $("btnRefreshData").addEventListener("click", () => refreshSheetData(true));
+    $("btnToggleSidebar").addEventListener("click", (e) => {
+      const workspace = document.querySelector(".workspace");
+      if (state.layoutMode === "map") setLayoutMode("split");
+      const collapsed = workspace.classList.toggle("sidebar-collapsed");
+      e.currentTarget.setAttribute("aria-expanded", String(!collapsed));
+      e.currentTarget.textContent = collapsed ? "Afficher le volet" : "Masquer le volet";
+      if (map) setTimeout(() => map.invalidateSize(), 120);
+    });
 
     // Map toolbar buttons (Basemap switcher: Google Plan, Google Satellite, OSM)
     $("btnBasemapGoogleStreets")?.addEventListener("click", () => setBasemap("google_streets"));
@@ -1375,6 +1746,7 @@ ${placemarks}
     updateCityCounts();
     restoreUrlState();
     bindEvents();
+    refreshSheetData(false);
     setTimeout(() => {
       if (map) map.invalidateSize();
       applyFiltersAndRender(state.city !== "ALL" || state.quartier !== "ALL");
